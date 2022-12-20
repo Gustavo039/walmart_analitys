@@ -1,0 +1,34 @@
+---
+title: "Análise e Previsão de Vendas - Walmart"
+author: "Gustavo Almeida Silva"
+output: 
+  html_document:
+    theme: united
+    toc: true
+    toc_float: true
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Observando a serie
+
+```{r}
+ts_walmart_meaned_data %>%
+  gg_tsdisplay(difference(Weekly_Sales, 12),
+               plot_type='partial', lag=36) +
+  labs(title="Seasonally differenced", y="")
+```
+
+
+```{r}
+ts_walmart_meaned_data %>%
+  gg_tsdisplay(difference(Weekly_Sales, 12) %>% difference(),
+               plot_type='partial', lag=36) +
+  labs(title = "Double differenced", y="")
+```
+
+
+# Propondo o Modelo
