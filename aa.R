@@ -23,11 +23,13 @@ holidays=data.frame(super_bowl=c(dmy("12-02-2010"),dmy("11-02-2011"),dmy("10-02-
 
 ts_walmart_data%>%
   filter(Store==sample(length(unique(ts_walmart_data$Store)),10))%>%
-  autoplot(.vars=Unemployment)
+  autoplot(.vars=Weekly_Sales )
                   
 
 
 ### General analytics##################
+
+## Viewing the data
 
 ts_walmart_meaned_data=walmart_data%>%
                             group_by(Date)%>%
@@ -49,13 +51,17 @@ ts_walmart_meaned_data%>%
                plot_type='partial', lag=36) +
     labs(title="Seasonally differenced", y="")
 
-## Seasonal Naive model
+## Testing models
 
 arima_walmart_fit=ts_walmart_meaned_data %>%
   model(arima = ARIMA(Weekly_Sales ~  pdq(2,1,0) ))
 
+arima_walmart_fit=ts_walmart_meaned_data %>%
+  model(arima = ARIMA(Weekly_Sales))
 
-forecast(arima_walmart_fit, h=7) %>%
+
+
+forecast(arima_walmart_fit, h=12) %>%
   autoplot(ts_walmart_meaned_data)
 
 forecast(arima_walmart_fit,h='1 month')

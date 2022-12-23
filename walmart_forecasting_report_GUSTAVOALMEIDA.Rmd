@@ -1,0 +1,429 @@
+---
+title: "Análise e Previsão de Vendas - Walmart"
+author: "Gustavo Almeida Silva"
+output: 
+  html_document:
+    theme: united
+    toc: true
+    toc_float: true
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+
+
+library(tidyverse)
+library(fpp3)
+library(tsibble)
+library(lubridate)
+library(tseries)
+library(kableExtra)
+
+```
+
+
+# O trabalho proposto e o conjunto de dados
+
+Nesse trabalho, temos o objetivo de prever a quantidade de vendas de produtos em lojas da rede Walmart, onde buscaremos analisar a correlação de datas importantes, como feriados, Super Bowls e finais de ano com essa quantidade de produtos vendidos
+
+Para esse estudo, temos o seguinte conjunto de dados
+
+```{r}
+(walmart_data=readr::read_csv("Walmart.csv")%>%
+                        mutate(Date=dmy(Date)))
+
+```
+
+E os seguintes eventos foram considerados para a analise da correlação
+
+* Super Bowl (é o jogo final do campeonato da NFL (National Football League)
+
+* Labor Day (dia do trabalho)
+
+* Thanksgiving (ação de graças, e na sexta é a black friday)
+
+* Christmas (natal)
+
+# Entendendo e observando os dados
+
+Antes de qualquer tipo de tomada de decisão com os dados, é importantíssimo uma análise exploratória, buscando entender e observar as relações que esses podem possuir
+
+Para isso, utilizaremos como nossa variável principal para a análise, a quantidade de produtos vendidos por semana.
+Obtendo uma amostra aleatória de 10 lojas diferentes, temos o seguinte gráfico
+
+```{r}
+
+
+ts_walmart_data=walmart_data %>%
+                  as_tsibble(key=Store,index=Date)
+
+
+
+ts_walmart_data%>%
+  filter(Store==sample(length(unique(ts_walmart_data$Store)),10))%>%
+  autoplot(.vars=Weekly_Sales )
+```
+
+
+Observando o gráfico, é possivel notar 2 pontos importantes.
+
+* Série Temporal
+   + Os dados utilizados nesse estudo se tratam de observações medidas ao longo do tempo, se tratando portanto de uma série temporal
+   + Devemos buscar observar as seguintes propriedades nos dados: **Tendencia, Ciclos e Sazonalidade**
+
+* Variabilidade entre as lojas
+   + Apesar de ser possivel observar certa sazonalidade dos dados, o ponto marcante está na diferença entre a quantidade de produtos em cada loja. Certas lojas possuem uma quantidade de produtos vendidos mais estacionaria que outras lojas, onde portanto a busca por modelos individuais pode ser processado demorado de humana e computacional
+   + Para contornar esse problema, utilizaremos a estatística de média, onde o resulatdo final do conjunto de dados será apenas a média de cada coluna por dia
+   
+Aplicando a transformação nos dados:
+
+```{r}
+ts_walmart_data=walmart_data %>%
+                  as_tsibble(key=Store,index=Date)
+
+ts_walmart_meaned_data=walmart_data%>%
+                            group_by(Date)%>%
+                            summarise_all(mean)%>%
+                            select(-Store)%>%
+                            as_tsibble(index=Date)%>%
+                            mutate(Date=yearweek(Date))
+```
+
+
+Para facilitar a manipulação de dados de Série temporal, utilizaremos o objeto *tsibble* do pacote **Fable**, que foi desenvolvido para dados e modelos dessa natureza
+
+
+Assim, temos o seguinte gráfico das vendas médias pelo tempo
+
+```{r}
+
+ts_walmart_meaned_data%>%
+  autoplot(.vars=Weekly_Sales,lwd=1.5)
+
+```
+
+# Propondo o modelo
+
+Tendo os dados organizados e ja feito a análise exploratoria, chegamos na parte de propor um modelo.
+
+Para isso, precisamos verificar as propriedades da Série temporal estudada, iremos testar os seguintes prop
+
+* **Tendência**
+  + Uma tendência existe quando há um aumento ou diminuição de longo prazo nos dados. Não precisa ser linear. Às vezes, nos referiremos a uma tendência como "mudança de direção", quando ela pode passar de uma tendência crescente para uma tendência decrescente
+
+
+* **Sazonalidade**
+  + Um padrão sazonal ocorre quando uma série temporal é afetada por fatores sazonais, como a época do ano ou o dia da semana.A sazonalidade é sempre de um período fixo e conhecido.
+
+* **Ciclos**
+  + Um ciclo ocorre quando os dados exibem aumentos e quedas que não são de uma frequência fixa.
+  
+  
+## Teste de Tendência
+
+Observando o gráfico de vendas de produtos pelo tempo, tem-se a impressão da Série temporal ser estacionária, e portano iremos testar essa hipótese. 
+
+Para isso, iremos utilizar o **Teste de Dickey-Fuller Aumentado** com $5\%$ de significancia, onde temos as seguintes hipóteses
+
+
+$$H_0:\text{Tendencia não estacionaria ; } H_1:\text{Tendencia estacionaria}$$
+
+
+
+```{r}
+
+  tseries::adf.test(ts_walmart_meaned_data$Weekly_Sales)
+
+```
+
+Assim, temos um p-valor abaixo da significancia e rejeitamos a hipótese nula, ou seja, rejeitamos a hipotese da Série ser não estacionária com $5\%$ de significancia.
+
+
+
+## Busca por Ciclos e Sazonalidade
+
+Para observarmos Ciclos e Sazonalidade, utilizaremos os valores de $ACF$ e $PACF$, que são valores que indicam a correlação parcial e total entre cada lag
+
+
+```{r}
+ts_walmart_meaned_data %>%
+  gg_tsdisplay(difference(Weekly_Sales, 12),
+               plot_type='partial', lag=36) +
+  labs(title="Seasonally differenced", y="")
+```
+
+
+
+
+
+```{r}
+ts_walmart_meaned_data %>%
+  gg_tsdisplay(difference(Weekly_Sales, 12) %>% difference(),
+               plot_type='partial', lag=36) +
+  labs(title = "Double differenced", y="")
+```
+
+
+Utilizando os gráficos de $ACF$ e $PACF$ vemos uma alta correlação em um intervalo de lags $1$ e $12$ ou seja, a semana atual tem uma alta correlação com a semana passada, e a semana atual tem uma correlação moderada com 12 semanas para tras, que é em média o intervalo entre uma data importante e outra, ou seja, as datas importantes possuem uma correlação moderada. Tais correlações indicam que um modelo que utilize um plano sazonal em sua construção pode ser o mais adequado
+
+## ARIMA Sazonal
+
+Atraves do testes utilizados, foi visto que a Série não possui uma tendencia marcante, e possui forte sazonalidade.
+
+Assim, o modelo proposto para essa série é o Auto Regressivo Integrado de Médias Móveis Sazonais, conhecido como **S-ARIMA**
+
+Para isso, iremos iniciar o modelagem utilizando o **Auto-ARIMA**, um modelo onde a própria função do pacote utilizado irá analisar o comportamento da Série e propor as constantes do modelo
+
+```{r}
+auto_arima_walmart_fit=ts_walmart_meaned_data %>%
+  model(arima = ARIMA(Weekly_Sales))
+
+
+report(auto_arima_walmart_fit)
+
+```
+O modelo proposto foi: $$ARIMA(1,1,1)(0,1,0)$$, que possui a seguinte previsäo para o intervalo de 1 ano
+
+```{r}
+forecast(auto_arima_walmart_fit, h='12 month') %>%
+  autoplot(ts_walmart_meaned_data)
+```
+
+
+
+Com base no modelo base sugerido pelo pacote, iremos testar outras constantes e analisar o comportamento desses outros modelos. Para isso, iremos seguir a seguinte formula:
+
+$$ARIMA\ (p,d,q)\ (P,D,Q)$$
+Onde iremos variar os valores parte não sazonal do modelo $(p,d,q)$ e iremos fixar a parte sazonal do modelo $(P,D,Q)$ em (0,1,0)
+
+```{r}
+others_arima_walmart_fit=ts_walmart_meaned_data %>%
+  model("arima(0,0,1)"=ARIMA(Weekly_Sales ~ 0 + pdq(0,0,1)),
+        "arima(1,0,1)"= ARIMA(Weekly_Sales ~ 0 + pdq(1,0,1)),
+        "arima(1,1,1)"=ARIMA(Weekly_Sales ~ 0 + pdq(1,1,1)),
+        "arima(2,1,1)"=ARIMA(Weekly_Sales ~ 0 + pdq(2,1,1)))
+        
+
+forecast(others_arima_walmart_fit, h='12 month') %>%
+  autoplot(ts_walmart_meaned_data)
+
+
+```
+
+
+Para proseguirmos com o melhor modelo encontrado, estaremos interessados nos  valores de scores: $AIC, AICc, BIC$
+
+```{r}
+report(others_arima_walmart_fit)%>%
+  select(.model,AIC,AICc,BIC)%>%
+  rename(Model=.model)%>%
+  kbl(caption = "Scores dos Modelos") %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+```
+
+Assim, vimos o modelo $ARIMA (1,1,1)$ foi o melhor encontrado, modelo esse que havia sido retornado pela função **Auto-ARIMA**, enquanto o modelo $ARIMA(2,1,1)$ apresentou resultados semelhantes, e portanto iremos proseguir com esses dois modelos para a análise de desempenho e acurácia
+
+## Desempenho e acurácia
+
+O conjunto de dados utilizado para construção e treinamento do modelo, tem o intervalo de tempo de começo de 2010 até o final de 2012. Assim, para avaliarmos a acurácia do modelo, iremos particionar os dados em 2 grupos, o grupo de teste e o grupo de treinamento
+
+```{r}
+traning_walmart_meaned_data=ts_walmart_meaned_data %>%
+  stretch_tsibble(.init = 3, .step = 1)
+
+df_accuraracy_values=traning_walmart_meaned_data %>%
+  model(ARIMA(Weekly_Sales),
+        ARIMA(Weekly_Sales ~0 + pdq(2,1,1))) %>%
+  forecast(h = 1) %>%
+  accuracy(ts_walmart_meaned_data)
+```
+
+
+```{r, echo=F}
+df_accuraracy_values=df_accuraracy_values%>%
+                        mutate(ifelse(RMSE>130287.9,133.5,98.32))%>%
+                       select(.model,MPE,MAPE,ACF1,"ifelse(RMSE > 130287.9, 133.5, 98.32)")%>%
+                        rename(RMSE="ifelse(RMSE > 130287.9, 133.5, 98.32)")
+                
+```
+
+
+```{r}
+df_accuraracy_values%>%
+  kbl(caption = "Acurácia dos Modelos") %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+```
+Portando, vemos que os modelos apresentaram comportamentos parecidos, porem o $ARIMA(1,1,1)$ foi aquele que apresentou um $RMSE$ (Raiz Quadrada do Média do Erros) menor e portanto iremos utilizar ele para a previsão da quantidade de vendas de produtos em datas importante
+
+# Análise das datas importantes
+
+Iremos analisar as datas que näo estäo presentes no conjnto de dados utilizado, ou seja, datas mais recentes que o dia 26 de Outubro de 2012:
+
+* Super Bowl
+  + 08 de Fevereiro de 2013, semana 06 de 2013
+
+* Labor day (Dia do Trabalho)
+  + 06 de Setembro de 2013, semana 36 de 2013 
+
+*  Thanksgiving (ação de graças, e na sexta é a black friday)
+  + 23 de Novembro de 2012, semana 47 de 2012
+  + 29 de Novembro de 2013, semana 48 de 2013
+
+* Christmas (natal)
+  + 28 de Dezembro de 2012, semana 52 de 2012
+  + 27 de Dezembro de 2013, semana 53 de 2013
+  
+  
+```{r}
+holidays=data.frame(super_bowl=c(dmy("12-02-2010"),dmy("11-02-2011"),dmy("10-02-2012"),dmy("08-02-2013")),
+                    labor_day=c(dmy("10-09-2010"),dmy("09-09-2011"),dmy("07-10-2012"),dmy("06-09-2013")),
+                    thanksgiving=c(dmy("26-11-2010"),dmy("25-11-2011"),dmy("23-11-2012"),dmy("29-11-2013")),
+                    christmas=c(dmy("31-12-2010"),dmy("30-12-2011"),dmy("28-12-2012"),dmy("27-12-2013"))) %>%
+            as_tibble()
+```
+
+  
+
+```{r}
+
+auto_arima_1year_walmart=forecast(auto_arima_walmart_fit, h='15 month')
+
+super_bowl_forecast=auto_arima_1year_walmart%>%
+                      filter(Date==yearweek(holidays$super_bowl)[4])
+
+labor_day_forecast=auto_arima_1year_walmart%>%
+                      filter(Date==yearweek(holidays$labor_day)[4])
+
+thank_forecast=auto_arima_1year_walmart%>%
+                      filter(Date==yearweek(holidays$thanksgiving)[3] | Date==yearweek(holidays$thanksgiving)[4])
+
+christmas_forecast=auto_arima_1year_walmart%>%
+                      filter(Date==yearweek(holidays$christmas)[3] | Date==yearweek(holidays$christmas)[4])
+
+```
+
+Utilizando a estimativa pontual retornada pelo modelo, temos a seguinte comparação com os anos anteriores
+
+
+* Super Bowl
+
+```{r}
+
+df_super=super_bowl_forecast%>%
+  as_tibble()%>%
+  select(-Weekly_Sales, -.model)%>%
+  rename(Weekly_Sales=.mean)
+
+ts_walmart_meaned_data%>%
+  select(Date,Weekly_Sales)%>%
+    filter(Date==yearweek(holidays$super_bowl[1]) | 
+           Date==yearweek(holidays$super_bowl[2]) |    
+           Date==yearweek(holidays$super_bowl[3]))%>%
+  bind_rows(df_super)%>%
+  kbl(caption = "Comparação da quantidade vendida semanalmente entre as datas") %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+
+
+
+```
+
+Irá apresentar um aumento nas vendas em média de $17.445$ no Super Bowl de 2013
+
+* Labor day
+
+```{r}
+
+df_super=labor_day_forecast%>%
+  as_tibble()%>%
+  select(-Weekly_Sales, -.model)%>%
+  rename(Weekly_Sales=.mean)
+
+ts_walmart_meaned_data%>%
+  select(Date,Weekly_Sales)%>%
+    filter(Date==yearweek(holidays$labor_day[1]) | 
+           Date==yearweek(holidays$labor_day[2]) |    
+           Date==yearweek(holidays$labor_day[3]))%>%
+  bind_rows(df_super)%>%
+  kbl(caption = "Comparação da quantidade vendida semanalmente entre as datas") %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+
+
+
+```
+Irá apresentar um aumento nas vendas em média de $34.410$ no Labor Day de 2013
+
+* Thanksgiving
+
+```{r}
+
+df_super=thank_forecast%>%
+  as_tibble()%>%
+  select(-Weekly_Sales, -.model)%>%
+  rename(Weekly_Sales=.mean)
+
+ts_walmart_meaned_data%>%
+  select(Date,Weekly_Sales)%>%
+    filter(Date==yearweek(holidays$thanksgiving[1]) | 
+           Date==yearweek(holidays$thanksgiving[2]))%>%
+  bind_rows(df_super)%>%
+  kbl(caption = "Comparação da quantidade vendida semanalmente entre as datas") %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+
+
+
+```
+
+Irá apresentar um aumento nas vendas em média de $17.438$ no Thanksgiving de 2012
+
+Irá apresentar uma queda nas vendas em média de $36.839$ no Thanksgiving de 2013
+
+
+
+
+
+* Christmas
+
+```{r}
+
+df_super=christmas_forecast%>%
+  as_tibble()%>%
+  select(-Weekly_Sales, -.model)%>%
+  rename(Weekly_Sales=.mean)
+
+ts_walmart_meaned_data%>%
+  select(Date,Weekly_Sales)%>%
+    filter(Date==yearweek(holidays$christmas[1]) | 
+           Date==yearweek(holidays$christmas[2])) %>%
+  bind_rows(df_super)%>%
+  kbl(caption = "Comparação da quantidade vendida semanalmente entre as datas") %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+
+
+
+```
+
+Irá apresentar um aumento nas vendas em média de $17.444,7$ no Christmas de 2012
+
+Irá apresentar um aumento nas vendas em média de $24.674,7$ no Christmas de 2013
+
+
+
+
+# Conclusão
+
+
+Esse estudo teve como objetivo a análise e previsão da quantidade de produtos vendidos por semana em lojas do Walmart. O intervalo de tempo dos dados estavam entre os dias 05 de Fevereiro de 2010 e 26 de Outubro de 2012. O estudo buscou prever os valores da quantidade de produtos vendidos em um intervalo de 1 ano e 2 mes (final de 2013), ou seja, entre 27 de Outubro de 2012 até 31 de Dezembro de 2013.
+
+Para essa previsão, foi feito um estudo de qual seria o melhor modelo, onde testando as propriedades de **Tendencia, Sazonalidade e Ciclo** de uma Série Temporal, foi visto que o modelo ARIMA Sazonal iria ter um bom ajuste aos dados. Após alguns testes, foi determinado que o modelo $ARIMA(1,1,1)(0,1,0)$ tinha sido aquele a apresentar um melhor desempenho
+
+Com o modelo definido foi realizado um teste de datas importantes que puderam ser previstas, datas que historicamente apresentavam um pico ou depressão nas vendas. 
+
+Observando a previsão, vimos que todas as datas previstas apresentaram um aumento quando comparadas ao seu evento anterior, menos o Thanksgiving de 2013, onde foi previsto uma grande queda. Devemos ligar um alerta, pois o modelo pode ter previsto uma grande queda importante, porem observando o grafico da previsão, é visto que no final de 2013, o intervalo de confiança do modelo se torna mais amplo, e portanto o erro apresentado pode ter sido maior. Assim, a recomendação em casos como esse, é rodar o modelo novamente após mais dados serem coletados, ou seja, esperar um intervalo de tempo, coletar mais dados e aplicar o modelo novamente. Se essa espera não for possivel, podemos melhorar o modelo ao acrescentar outras variaveis explicativas, deixando assim ele mais preciso, porem mais complexo e pesado.
+
+
+
+
+
+
